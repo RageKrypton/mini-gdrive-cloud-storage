@@ -110,15 +110,17 @@ def download_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
+    # build the real path on disk
     file_path = STORAGE_DIR / str(user_id) / file.stored_name
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File missing on disk")
 
     return FileResponse(
         path=file_path,
-        media_type=file.content_type or "application/octet-stream",
+        media_type="application/octet-stream",  # just use a default
         filename=file.original_name,
     )
+
 
 
 # --- delete a file ---

@@ -1,10 +1,11 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
 from app.models.database import Base, engine
 from app.routers import auth, files  # <--- important
+from app.routers.files import get_current_user_id
 
 Base.metadata.create_all(bind=engine)
 
@@ -21,5 +22,7 @@ app.include_router(files.router)
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    # simple landing page, we'll reuse home.html for now
-    return templates.TemplateResponse("home.html", {"request": request})
+    user_id = get_current_user_id(request)
+    if user_id:
+        return RedirectResponse(url="/files", status_code=303)
+    return RedirectResponse(url="/login", status_code=303)
