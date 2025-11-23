@@ -48,8 +48,67 @@
         </div>
     </div>
 
+    <!-- Dashboard Stats (only show when not searching) -->
+    {% if not search_query and stats %}
+    <div class="dashboard-stats">
+        <div class="stat-card stat-card-primary">
+            <div class="stat-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <div class="stat-value">{{ stats.total_files }}</div>
+                <div class="stat-label">Total Files</div>
+            </div>
+        </div>
+
+        <div class="stat-card stat-card-success">
+            <div class="stat-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <div class="stat-value">
+                    {% if stats.total_storage < 1024 %}
+                        {{ stats.total_storage }} B
+                    {% elif stats.total_storage < 1048576 %}
+                        {{ "%.1f"|format(stats.total_storage / 1024) }} KB
+                    {% elif stats.total_storage < 1073741824 %}
+                        {{ "%.2f"|format(stats.total_storage / 1048576) }} MB
+                    {% else %}
+                        {{ "%.2f"|format(stats.total_storage / 1073741824) }} GB
+                    {% endif %}
+                </div>
+                <div class="stat-label">Storage Used</div>
+            </div>
+        </div>
+
+        <div class="stat-card stat-card-info">
+            <div class="stat-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <div class="stat-value">{{ stats.recent_files }}</div>
+                <div class="stat-label">Recent Uploads (7 days)</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Files Section -->
     <div class="drive-content">
+        {% if error %}
+        <div class="alert alert-error" style="margin: 16px 24px;">
+            {{ error }}
+        </div>
+        {% endif %}
         <div class="files-header">
             <h1 class="page-heading">
                 {% if search_query %}
@@ -133,6 +192,12 @@
                                         <line x1="12" y1="15" x2="12" y2="3"></line>
                                     </svg>
                                 </a>
+                                <button type="button" class="action-btn rename-btn" title="Rename" data-file-id="{{ f.id }}" data-file-name="{{ f.original_name }}">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                    </svg>
+                                </button>
                                 <form action="/delete/{{ f.id }}" method="post" class="delete-form" onsubmit="return confirm('Permanently delete this file?');">
                                     <button type="submit" class="action-btn delete-btn" title="Delete">
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -199,12 +264,45 @@
     </div>
 </div>
 
+<!-- Rename Modal -->
+<div id="renameModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Rename File</h2>
+            <button type="button" class="modal-close" onclick="closeRenameModal()">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <form id="renameForm" method="post" action="" class="modal-body">
+            <div class="form-group">
+                <label for="new_name" class="form-label">New file name</label>
+                <input 
+                    type="text" 
+                    id="new_name" 
+                    name="new_name" 
+                    class="form-input" 
+                    required
+                    autocomplete="off"
+                    placeholder="Enter new file name"
+                >
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeRenameModal()">Cancel</button>
+                <button type="submit" class="btn-primary">Rename</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
 function clearSearch() {
     window.location.href = '/files';
 }
 
-// Auto-submit search on Enter key
+// Auto-submit search on Enter key and initialize rename buttons
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.querySelector('.search-input');
     if (searchInput) {
@@ -213,6 +311,74 @@ document.addEventListener('DOMContentLoaded', function() {
                 e.target.form.submit();
             }
         });
+    }
+    
+    // Attach click handlers to all rename buttons
+    const renameButtons = document.querySelectorAll('.rename-btn');
+    renameButtons.forEach(function(button) {
+        button.addEventListener('click', function() {
+            const fileId = this.getAttribute('data-file-id');
+            const fileName = this.getAttribute('data-file-name');
+            if (fileId && fileName !== null) {
+                openRenameModal(parseInt(fileId), fileName);
+            }
+        });
+    });
+});
+
+// Rename modal functions
+function openRenameModal(fileId, currentName) {
+    try {
+        const modal = document.getElementById('renameModal');
+        const form = document.getElementById('renameForm');
+        const input = document.getElementById('new_name');
+        
+        if (!modal || !form || !input) {
+            console.error('Modal elements not found');
+            return;
+        }
+        
+        form.action = '/rename/' + fileId;
+        input.value = currentName || '';
+        
+        // Select filename without extension for easier editing
+        const lastDotIndex = input.value.lastIndexOf('.');
+        if (lastDotIndex > 0) {
+            input.setSelectionRange(0, lastDotIndex);
+        } else {
+            input.select();
+        }
+        
+        modal.style.display = 'flex';
+        setTimeout(() => input.focus(), 100);
+    } catch (error) {
+        console.error('Error opening rename modal:', error);
+    }
+}
+
+function closeRenameModal() {
+    try {
+        const modal = document.getElementById('renameModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error closing rename modal:', error);
+    }
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('renameModal');
+    if (event.target === modal) {
+        closeRenameModal();
+    }
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeRenameModal();
     }
 });
 </script>

@@ -1,6 +1,8 @@
 from pathlib import Path
 import time
 import io
+from datetime import datetime, timedelta
+from sqlalchemy import func
 
 import boto3
 from fastapi import APIRouter, Request, Depends, UploadFile, File as FastAPIFile, HTTPException
@@ -55,15 +57,36 @@ def get_current_user_id(request: Request) -> int | None:
 
 # --- show user's files (drive/dashboard) ---
 @router.get("/files", response_class=HTMLResponse)
-def list_files(request: Request, db: Session = Depends(get_db), search: str = None):
+def list_files(request: Request, db: Session = Depends(get_db), search: str = None, error: str = None):
     user_id = get_current_user_id(request)
     if not user_id:
         return RedirectResponse(url="/login", status_code=303)
 
-    # Get all user's files
-    query = db.query(FileMeta).filter(FileMeta.owner_id == user_id)
+    # Get all user's files (for stats - no search filter)
+    all_files_query = db.query(FileMeta).filter(FileMeta.owner_id == user_id)
     
-    # Apply search filter if search query is provided
+    # Calculate statistics (only when not searching)
+    stats = {}
+    if not search or not search.strip():
+        # Total files count
+        total_files = all_files_query.count()
+        
+        # Total storage used (sum of all file sizes)
+        total_storage_result = all_files_query.with_entities(func.sum(FileMeta.size)).scalar()
+        total_storage = total_storage_result if total_storage_result else 0
+        
+        # Files uploaded in last 7 days
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        recent_files_count = all_files_query.filter(FileMeta.uploaded_at >= seven_days_ago).count()
+        
+        stats = {
+            "total_files": total_files,
+            "total_storage": total_storage,
+            "recent_files": recent_files_count,
+        }
+
+    # Get filtered files (with search if provided)
+    query = all_files_query
     if search and search.strip():
         search_term = f"%{search.strip().lower()}%"
         query = query.filter(FileMeta.original_name.ilike(search_term))
@@ -76,6 +99,8 @@ def list_files(request: Request, db: Session = Depends(get_db), search: str = No
             "request": request,
             "files": files,
             "search_query": search or "",
+            "stats": stats,
+            "error": error,
         },
     )
 
@@ -157,6 +182,41 @@ def download_file(
     )
 
 
+
+
+# --- rename a file ---
+@router.post("/rename/{file_id}")
+async def rename_file(
+    file_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id(request)
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=303)
+
+    # Get form data
+    form_data = await request.form()
+    new_name = form_data.get("new_name", "").strip()
+    
+    if not new_name:
+        # Redirect back with error message in query param
+        from urllib.parse import quote
+        return RedirectResponse(url=f"/files?error={quote('Invalid filename')}", status_code=303)
+
+    file = (
+        db.query(FileMeta)
+        .filter(FileMeta.id == file_id, FileMeta.owner_id == user_id)
+        .first()
+    )
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Update the original_name in database (stored_name on S3 stays the same)
+    file.original_name = new_name
+    db.commit()
+
+    return RedirectResponse(url="/files", status_code=303)
 
 
 # --- delete a file ---
