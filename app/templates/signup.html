@@ -1,20 +1,70 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Signup</title>
-</head>
-<body>
-    <h2>Create an account</h2>
-    <form method="POST">
-        <input type="text" name="username" placeholder="Username" required><br><br>
-        <input type="password" name="password" placeholder="Password" required><br><br>
-        <button type="submit">Sign Up</button>
-    </form>
+{% extends "base.html" %}
 
-    <p>Already have an account? <a href="/login">Login</a></p>
+{% block title %}Sign up · Mini Cloud Drive{% endblock %}
 
-    {% if error %}
-        <p style="color:red">{{ error }}</p>
-    {% endif %}
-</body>
-</html>
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="auth-logo">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                </svg>
+            </div>
+            <h1 class="auth-title">Create your account</h1>
+            <p class="auth-subtitle">Start storing your files securely in the cloud</p>
+        </div>
+
+        {% if error %}
+        <div class="auth-error">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <form action="/signup" method="post" class="auth-form">
+            <div class="form-group">
+                <label for="username" class="form-label">Username</label>
+                <input 
+                    type="text" 
+                    id="username" 
+                    name="username" 
+                    class="form-input" 
+                    required
+                    autocomplete="username"
+                    placeholder="Choose a username"
+                >
+            </div>
+            
+            <div class="form-group">
+                <label for="password" class="form-label">Password</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    class="form-input" 
+                    required
+                    autocomplete="new-password"
+                    placeholder="Create a password"
+                >
+            </div>
+
+            <button type="submit" class="auth-submit-btn">
+                <span>Create account</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </button>
+        </form>
+
+        <div class="auth-footer">
+            <span class="auth-footer-text">Already have an account?</span>
+            <a href="/login" class="auth-footer-link">Sign in</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

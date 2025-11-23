@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Mini Cloud Drive{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+<div class="app-container">
+    <header class="app-header">
+        <div class="header-left">
+            <div class="app-logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+            </div>
+            <div class="app-brand">
+                <span class="brand-name">Mini Cloud Drive</span>
+            </div>
+        </div>
+
+        <div class="header-right">
+            {% if request.cookies.get("user_id") %}
+                <a href="/files" class="nav-link active">My Drive</a>
+                <div class="user-menu">
+                    <form action="/logout" method="post" class="logout-form">
+                        <button type="submit" class="btn-logout">Logout</button>
+                    </form>
+                </div>
+            {% else %}
+                <a href="/login" class="nav-link">Sign in</a>
+                <a href="/signup" class="btn-signin">Sign up</a>
+            {% endif %}
+        </div>
+    </header>
+
+    <main class="app-main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="app-footer">
+        <div class="footer-content">
+            <span>Cloud Computing Project</span>
+            <span class="footer-separator">·</span>
+            <span>Compute & Elasticity</span>
+            <span class="footer-separator">·</span>
+            <span>Secure file storage on AWS S3</span>
+        </div>
+    </footer>
+</div>
+</body>
+</html>

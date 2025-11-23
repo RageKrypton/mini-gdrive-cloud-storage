@@ -1,18 +1,33 @@
 from pathlib import Path
 import time
+import io
 
+import boto3
 from fastapi import APIRouter, Request, Depends, UploadFile, File as FastAPIFile, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.models.database import SessionLocal
 from app.models.file import FileMeta
+from app.core.config import get_settings
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-# where files will be stored locally (later we can move this to S3)
+settings = get_settings()
+
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=settings.aws_access_key_id,
+    aws_secret_access_key=settings.aws_secret_access_key,
+    region_name=settings.aws_region,
+)
+
+BUCKET_NAME = settings.aws_s3_bucket_name
+
+# (Optional) You can keep STORAGE_DIR if you still want local storage,
+# but for now S3 is our main storage.
 BASE_DIR = Path(__file__).resolve().parent.parent
 STORAGE_DIR = BASE_DIR / "storage"
 STORAGE_DIR.mkdir(exist_ok=True)
@@ -40,18 +55,27 @@ def get_current_user_id(request: Request) -> int | None:
 
 # --- show user's files (drive/dashboard) ---
 @router.get("/files", response_class=HTMLResponse)
-def list_files(request: Request, db: Session = Depends(get_db)):
+def list_files(request: Request, db: Session = Depends(get_db), search: str = None):
     user_id = get_current_user_id(request)
     if not user_id:
         return RedirectResponse(url="/login", status_code=303)
 
-    files = db.query(FileMeta).filter(FileMeta.owner_id == user_id).all()
+    # Get all user's files
+    query = db.query(FileMeta).filter(FileMeta.owner_id == user_id)
+    
+    # Apply search filter if search query is provided
+    if search and search.strip():
+        search_term = f"%{search.strip().lower()}%"
+        query = query.filter(FileMeta.original_name.ilike(search_term))
+    
+    files = query.order_by(FileMeta.uploaded_at.desc()).all()
 
     return templates.TemplateResponse(
         "home.html",
         {
             "request": request,
             "files": files,
+            "search_query": search or "",
         },
     )
 
@@ -67,28 +91,33 @@ async def upload_file(
     if not user_id:
         return RedirectResponse(url="/login", status_code=303)
 
-    # folder per user
-    user_folder = STORAGE_DIR / str(user_id)
-    user_folder.mkdir(parents=True, exist_ok=True)
+    # Create a unique S3 key, grouped per user
+    key = f"{user_id}/{int(time.time())}_{upload.filename}"
 
-    stored_name = f"{int(time.time())}_{upload.filename}"
-    file_path = user_folder / stored_name
-
+    # Read file content
     content = await upload.read()
-    with file_path.open("wb") as f:
-        f.write(content)
 
+    # Upload to S3
+    s3.put_object(
+        Bucket=BUCKET_NAME,
+        Key=key,
+        Body=content,
+        ContentType=upload.content_type or "application/octet-stream",
+    )
+
+    # Save metadata in DB
     meta = FileMeta(
         owner_id=user_id,
-        stored_name=stored_name,
+        stored_name=key,          # we will use this as the S3 key
         original_name=upload.filename,
-        path=str(file_path),  # <-- THIS WAS MISSING
         size=len(content),
+        path=key,                 # if your 'path' column is NOT NULL
     )
     db.add(meta)
     db.commit()
 
     return RedirectResponse(url="/files", status_code=303)
+
 
 
 # --- download a file ---
@@ -110,16 +139,23 @@ def download_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # build the real path on disk
-    file_path = STORAGE_DIR / str(user_id) / file.stored_name
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File missing on disk")
+    # Fetch object from S3
+    try:
+        obj = s3.get_object(Bucket=BUCKET_NAME, Key=file.stored_name)
+    except Exception:
+        raise HTTPException(status_code=404, detail="File missing in cloud")
 
-    return FileResponse(
-        path=file_path,
-        media_type="application/octet-stream",  # just use a default
-        filename=file.original_name,
+    file_bytes = obj["Body"].read()
+    content_type = obj.get("ContentType") or "application/octet-stream"
+
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{file.original_name}"'
+        },
     )
+
 
 
 
@@ -142,9 +178,12 @@ def delete_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = STORAGE_DIR / str(user_id) / file.stored_name
-    if file_path.exists():
-        file_path.unlink()
+    # Delete from S3
+    try:
+        s3.delete_object(Bucket=BUCKET_NAME, Key=file.stored_name)
+    except Exception:
+        # we can log this, but still attempt to delete DB record
+        pass
 
     db.delete(file)
     db.commit()

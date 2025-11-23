@@ -1,21 +1,70 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Login - Mini Drive</title>
-</head>
-<body>
-    <h2>Login</h2>
+{% extends "base.html" %}
 
-    <form action="/login" method="post">
-        <label>Username:</label>
-        <input type="text" name="username" required><br>
+{% block title %}Sign in · Mini Cloud Drive{% endblock %}
 
-        <label>Password:</label>
-        <input type="password" name="password" required><br>
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="auth-logo">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                </svg>
+            </div>
+            <h1 class="auth-title">Welcome back</h1>
+            <p class="auth-subtitle">Sign in to access your files</p>
+        </div>
 
-        <button type="submit">Login</button>
-    </form>
+        {% if error %}
+        <div class="auth-error">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
 
-    <p>Don't have an account? <a href="/signup">Register</a></p>
-</body>
-</html>
+        <form action="/login" method="post" class="auth-form">
+            <div class="form-group">
+                <label for="username" class="form-label">Username</label>
+                <input 
+                    type="text" 
+                    id="username" 
+                    name="username" 
+                    class="form-input" 
+                    required
+                    autocomplete="username"
+                    placeholder="Enter your username"
+                >
+            </div>
+            
+            <div class="form-group">
+                <label for="password" class="form-label">Password</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    class="form-input" 
+                    required
+                    autocomplete="current-password"
+                    placeholder="Enter your password"
+                >
+            </div>
+
+            <button type="submit" class="auth-submit-btn">
+                <span>Sign in</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </button>
+        </form>
+
+        <div class="auth-footer">
+            <span class="auth-footer-text">Don't have an account?</span>
+            <a href="/signup" class="auth-footer-link">Sign up</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

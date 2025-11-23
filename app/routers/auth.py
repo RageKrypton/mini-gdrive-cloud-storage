@@ -59,8 +59,10 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     response.set_cookie("user_id", str(user.id))
     return response
 
+@router.post("/logout")
 @router.get("/logout")
 def logout():
     response = RedirectResponse(url="/login", status_code=303)
+    # clear cookie
     response.delete_cookie("user_id")
     return response
