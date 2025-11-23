@@ -55,6 +55,12 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
 
     # login success → set a cookie
-    response = RedirectResponse(url="/", status_code=303)
+    response = RedirectResponse(url="/files", status_code=303)  # <--- go to drive
     response.set_cookie("user_id", str(user.id))
+    return response
+
+@router.get("/logout")
+def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("user_id")
     return response

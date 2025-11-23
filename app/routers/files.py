@@ -1,16 +1,7 @@
-# app/routers/files.py
+from pathlib import Path
+import time
 
-import os
-import uuid
-from typing import List
-
-from fastapi import (
-    APIRouter,
-    Request,
-    Depends,
-    UploadFile,
-    File,
-)
+from fastapi import APIRouter, Request, Depends, UploadFile, File as FastAPIFile, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -21,13 +12,13 @@ from app.models.file import FileMeta
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-# Where uploaded files are stored on disk
-UPLOAD_DIR = "user_files"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# where files will be stored locally (later we can move this to S3)
+BASE_DIR = Path(__file__).resolve().parent.parent
+STORAGE_DIR = BASE_DIR / "storage"
+STORAGE_DIR.mkdir(exist_ok=True)
 
 
-# ---------- DB DEPENDENCY ----------
-
+# --- DB session dependency (same pattern as in auth.py) ---
 def get_db():
     db = SessionLocal()
     try:
@@ -36,8 +27,7 @@ def get_db():
         db.close()
 
 
-# ---------- HELPER: CURRENT USER ----------
-
+# --- helper: get current logged in user id from cookie ---
 def get_current_user_id(request: Request) -> int | None:
     user_id = request.cookies.get("user_id")
     if not user_id:
@@ -48,23 +38,17 @@ def get_current_user_id(request: Request) -> int | None:
         return None
 
 
-# ---------- ROUTES ----------
-
+# --- show user's files (drive/dashboard) ---
 @router.get("/files", response_class=HTMLResponse)
 def list_files(request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     if not user_id:
         return RedirectResponse(url="/login", status_code=303)
 
-    files: List[FileMeta] = (
-        db.query(FileMeta)
-        .filter(FileMeta.owner_id == user_id)
-        .order_by(FileMeta.uploaded_at.desc())
-        .all()
-    )
+    files = db.query(FileMeta).filter(FileMeta.owner_id == user_id).all()
 
     return templates.TemplateResponse(
-        "files.html",
+        "home.html",
         {
             "request": request,
             "files": files,
@@ -72,43 +56,42 @@ def list_files(request: Request, db: Session = Depends(get_db)):
     )
 
 
+# --- upload a new file ---
 @router.post("/upload")
 async def upload_file(
     request: Request,
-    upload: UploadFile = File(...),
+    upload: UploadFile = FastAPIFile(...),
     db: Session = Depends(get_db),
 ):
     user_id = get_current_user_id(request)
     if not user_id:
         return RedirectResponse(url="/login", status_code=303)
 
-    # Read file into memory
+    # folder per user
+    user_folder = STORAGE_DIR / str(user_id)
+    user_folder.mkdir(parents=True, exist_ok=True)
+
+    stored_name = f"{int(time.time())}_{upload.filename}"
+    file_path = user_folder / stored_name
+
     content = await upload.read()
-
-    # Generate a safe unique name for storing on disk
-    stored_name = uuid.uuid4().hex
-    file_path = os.path.join(UPLOAD_DIR, stored_name)
-
-    # Save to disk
-    with open(file_path, "wb") as f:
+    with file_path.open("wb") as f:
         f.write(content)
 
-    # Save metadata in DB
-    file_meta = FileMeta(
-        original_name=upload.filename,
-        stored_name=stored_name,
+    meta = FileMeta(
         owner_id=user_id,
+        stored_name=stored_name,
+        original_name=upload.filename,
+        path=str(file_path),  # <-- THIS WAS MISSING
         size=len(content),
-        content_type=upload.content_type,
     )
-
-    db.add(file_meta)
+    db.add(meta)
     db.commit()
-    db.refresh(file_meta)
 
     return RedirectResponse(url="/files", status_code=303)
 
 
+# --- download a file ---
 @router.get("/download/{file_id}")
 def download_file(
     file_id: int,
@@ -119,23 +102,26 @@ def download_file(
     if not user_id:
         return RedirectResponse(url="/login", status_code=303)
 
-    file = db.query(FileMeta).filter(
-        FileMeta.id == file_id,
-        FileMeta.owner_id == user_id,
-    ).first()
-
+    file = (
+        db.query(FileMeta)
+        .filter(FileMeta.id == file_id, FileMeta.owner_id == user_id)
+        .first()
+    )
     if not file:
-        # Just send back to /files for now; later we can show proper error
-        return RedirectResponse(url="/files", status_code=303)
+        raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = os.path.join(UPLOAD_DIR, file.stored_name)
+    file_path = STORAGE_DIR / str(user_id) / file.stored_name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+
     return FileResponse(
-        file_path,
+        path=file_path,
         media_type=file.content_type or "application/octet-stream",
         filename=file.original_name,
     )
 
 
+# --- delete a file ---
 @router.post("/delete/{file_id}")
 def delete_file(
     file_id: int,
@@ -146,22 +132,19 @@ def delete_file(
     if not user_id:
         return RedirectResponse(url="/login", status_code=303)
 
-    file = db.query(FileMeta).filter(
-        FileMeta.id == file_id,
-        FileMeta.owner_id == user_id,
-    ).first()
-
+    file = (
+        db.query(FileMeta)
+        .filter(FileMeta.id == file_id, FileMeta.owner_id == user_id)
+        .first()
+    )
     if not file:
-        return RedirectResponse(url="/files", status_code=303)
+        raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = os.path.join(UPLOAD_DIR, file.stored_name)
+    file_path = STORAGE_DIR / str(user_id) / file.stored_name
+    if file_path.exists():
+        file_path.unlink()
 
-    # Remove metadata from DB
     db.delete(file)
     db.commit()
-
-    # Remove file from disk (ignore if already gone)
-    if os.path.exists(file_path):
-        os.remove(file_path)
 
     return RedirectResponse(url="/files", status_code=303)
